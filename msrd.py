@@ -8,33 +8,92 @@ monitor = mapper.monitor(enable_autorequest=1)
 
 devices = {}
 links = {}
-connections = {}
+
+def restore_links(dev, scenario):
+    print 'restore_links:', scenario, dev
+    if scenario not in devices[dev['name']]:
+        return
+    print scenario, 'device', dev['name'], 'restarted after', now-devices[dev['name']]['released'], 'seconds.'
+    remove = []
+    for i in links:
+        if links[i]['src_name'] == dev['name']:
+            if 'src_'+scenario in links[i]:
+                del links[i]['src_'+scenario]
+            if 'dest_'+scenario not in links[i]:
+                print '  relinking', dev['name'], '->', links[i]['dest_name']
+                monitor.link(dev['name'], links[i]['dest_name'], links[i])
+                for j in links[i]['connections']:
+                    print '    reconnecting', links[i]['connections'][j]['src_name'], '->', links[i]['connections'][j]['dest_name']
+                    monitor.connect(links[i]['connections'][j]['src_name'], links[i]['connections'][j]['dest_name'], j)
+                remove.append(i)
+        elif links[i]['dest_name'] == dev['name']:
+            if 'dest_'+scenario in links[i]:
+                del links[i]['dest_'+scenario]
+            if 'src_'+scenario not in links[i]:
+                print '  relinking', links[i]['src_name'], '->', dev['name']
+                monitor.link(links[i]['src_name'], dev['name'], links[i])
+                for j in links[i]['connections']:
+                    print '    reconnecting', links[i]['connections'][j]['src_name'], '->', links[i]['connections'][j]['dest_name']
+                    monitor.connect(links[i]['connections'][j]['src_name'], links[i]['connections'][j]['dest_name'], links[i]['connections'][j])
+                remove.append(i)
+    for i in remove:
+        del links[i]
 
 def on_device(dev, action):
     global devices
+    now = monitor.now()
     if action == mapper.MDB_NEW:
-        print 'new device named', dev['name']
-        if dev['name'] in devices and 'released' in devices[dev['name']]:
-            print 'DEVICE', i['name'], 'RESTARTED!'
-            now = monitor.now()
-            if now - devices[dev['name']]['released'] < timeout:
-                print 'RESTORING LINKS & CONNECTIONS!'
-            else:
-                print 'FORGETTING LINKS & CONNECTIONS!'
+        if dev['name'] not in devices:
+            devices[dev['name']] = dev
+            return
+        elif 'released' in devices[dev['name']]:
+            restore_links(dev, 'released')
+        elif 'crashed' in devices[dev['name']]:
+            restore_links(dev, 'crashed')
         devices[dev['name']] = dev
     elif action == mapper.MDB_MODIFY:
-        devices[dev['name']] = dev
+        if dev['name'] not in devices:
+            devices[dev['name']] = dev
+        else:
+            for i in dev:
+                devices[dev['name']][i] = dev[i]
     elif action == mapper.MDB_REMOVE:
-        now = monitor.now()
         devices[dev['name']]['released'] = now
+        for i in links:
+            if links[i]['src_name'] == dev['name']:
+                links[i]['src_released'] = now
+            elif links[i]['dest_name'] == dev['name']:
+                links[i]['dest_released'] = now
 
 def on_link(link, action):
+    key = link['src_name'] + '>' + link['dest_name']
     if action == mapper.MDB_NEW:
-        print 'new link'
+        links[key] = link
+        links[key]['connections'] = {}
+    elif action == mapper.MDB_MODIFY:
+        for i in link:
+            links[key][i] = link[i]
+    elif action == mapper.MDB_REMOVE:
+        now = monitor.now()
+        links[key]['released'] = now
 
-def on_connection(connection, action):
+def on_connection(con, action):
+    index = con['src_name'].find('/', 1)
+    srcdev = con['src_name'][0:index]
+    srcsig = con['src_name'][index:]
+    index = con['dest_name'].find('/', 1)
+    destdev = con['dest_name'][0:index]
+    destsig = con['dest_name'][index:]
+    devkey = srcdev + '>' + destdev
+    sigkey = srcsig + '>' + destsig
     if action == mapper.MDB_NEW:
-        print 'new connection'
+        links[devkey]['connections'][sigkey] = con
+    elif action == mapper.MDB_MODIFY:
+        for i in con:
+            links[devkey]['connections'][sigkey][i] = con[i]
+    elif action == mapper.MDB_REMOVE:
+        now = monitor.now()
+        links[devkey]['connections'][sigkey]['released'] = now
 
 def init_monitor():
     monitor.db.add_device_callback(on_device)
@@ -44,17 +103,23 @@ def init_monitor():
 
 init_monitor()
 
-for j in range(10):
+while 1:
     monitor.poll(1000)
     now = monitor.now()
     for i in monitor.db.all_devices():
         if i['name'] not in devices:
             continue
         synced = i['synced']
-        print 'synced', synced, '(', now-synced, ')'
         if synced and now-synced > 5:
-            print 'device', i['name'], 'may have crashed!'
+            print 'device', i['name'], 'may have crashed! (', now-synced, 'sec timeout)'
             devices[i['name']]['crashed'] = now
         elif 'crashed' in devices[i['name']]:
             del devices[i['name']]['crashed']
-
+    remove = [k for k in devices if 'released' in devices[k] and now-devices[k]['released'] > timeout]
+    for k in remove:
+        print 'timeout: forgetting released device', devices[k]['name']
+        del devices[k]
+    remove = [k for k in devices if 'crashed' in devices[k] and now-devices[k]['crashed'] > timeout]
+    for k in remove:
+        print 'timeout: forgetting crashed device', devices[k]['name']
+        del devices[k]
