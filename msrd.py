@@ -1,22 +1,33 @@
 #!/usr/bin/env python
 
 import mapper
-
-timeout = 60
+import argparse
 
 monitor = mapper.monitor(enable_autorequest=1)
+
+parser = argparse.ArgumentParser(description='Automatically restore libmapper network state.')
+parser.add_argument('--timeout', dest='timeout', type=int, default=60, help='Timeout after which records are flushed. Links and connections will only be restored if the relevant devices restart before timeout elapses.')
+
+args = parser.parse_args()
+timeout = args.timeout
 
 devices = {}
 links = {}
 
+def compare_device_class(name1, name2):
+    index = name1.find('.', 0)
+    left = name1[0:index]
+    index = name2.find('.', 0)
+    right = name2[0:index]
+    return left == right
+
 def restore_links(dev, scenario):
-    print 'restore_links:', scenario, dev
     if scenario not in devices[dev['name']]:
         return
-    print scenario, 'device', dev['name'], 'restarted after', now-devices[dev['name']]['released'], 'seconds.'
+    print 'device', dev['name'], 'restarted', now-devices[dev['name']]['released'], 'seconds after', 'shutting down.' if scenario=='released' else 'crashing.'
     remove = []
     for i in links:
-        if links[i]['src_name'] == dev['name']:
+        if compare_device_class(links[i]['src_name'], dev['name']) and links[i]['src_host'] == dev['host']:
             if 'src_'+scenario in links[i]:
                 del links[i]['src_'+scenario]
             if 'dest_'+scenario not in links[i]:
@@ -24,9 +35,9 @@ def restore_links(dev, scenario):
                 monitor.link(dev['name'], links[i]['dest_name'], links[i])
                 for j in links[i]['connections']:
                     print '    reconnecting', links[i]['connections'][j]['src_name'], '->', links[i]['connections'][j]['dest_name']
-                    monitor.connect(links[i]['connections'][j]['src_name'], links[i]['connections'][j]['dest_name'], j)
+                    monitor.connect(links[i]['connections'][j]['src_name'], links[i]['connections'][j]['dest_name'], links[i]['connections'][j])
                 remove.append(i)
-        elif links[i]['dest_name'] == dev['name']:
+        elif compare_device_class(links[i]['dest_name'], dev['name']) and links[i]['dest_host'] == dev['host']:
             if 'dest_'+scenario in links[i]:
                 del links[i]['dest_'+scenario]
             if 'src_'+scenario not in links[i]:
@@ -40,7 +51,6 @@ def restore_links(dev, scenario):
         del links[i]
 
 def on_device(dev, action):
-    global devices
     now = monitor.now()
     if action == mapper.MDB_NEW:
         if dev['name'] not in devices:
@@ -70,6 +80,8 @@ def on_link(link, action):
     if action == mapper.MDB_NEW:
         links[key] = link
         links[key]['connections'] = {}
+        links[key]['src_host'] = devices[link['src_name']]['host']
+        links[key]['dest_host'] = devices[link['dest_name']]['host']
     elif action == mapper.MDB_MODIFY:
         for i in link:
             links[key][i] = link[i]
@@ -86,14 +98,12 @@ def on_connection(con, action):
     destsig = con['dest_name'][index:]
     devkey = srcdev + '>' + destdev
     sigkey = srcsig + '>' + destsig
-    if action == mapper.MDB_NEW:
+    if action == mapper.MDB_NEW or action == mapper.MDB_MODIFY:
         links[devkey]['connections'][sigkey] = con
-    elif action == mapper.MDB_MODIFY:
-        for i in con:
-            links[devkey]['connections'][sigkey][i] = con[i]
     elif action == mapper.MDB_REMOVE:
-        now = monitor.now()
-        links[devkey]['connections'][sigkey]['released'] = now
+        if devkey in links and sigkey in links[devkey]['connections']:
+            now = monitor.now()
+            links[devkey]['connections'][sigkey]['released'] = now
 
 def init_monitor():
     monitor.db.add_device_callback(on_device)
@@ -110,11 +120,12 @@ while 1:
         if i['name'] not in devices:
             continue
         synced = i['synced']
-        if synced and now-synced > 5:
-            print 'device', i['name'], 'may have crashed! (', now-synced, 'sec timeout)'
-            devices[i['name']]['crashed'] = now
-        elif 'crashed' in devices[i['name']]:
-            del devices[i['name']]['crashed']
+        if synced:
+            if now-synced > 11:
+                print 'device', i['name'], 'may have crashed! (', now-synced, 'sec timeout)'
+                devices[i['name']]['crashed'] = now
+            elif 'crashed' in devices[i['name']]:
+                del devices[i['name']]['crashed']
     remove = [k for k in devices if 'released' in devices[k] and now-devices[k]['released'] > timeout]
     for k in remove:
         print 'timeout: forgetting released device', devices[k]['name']
