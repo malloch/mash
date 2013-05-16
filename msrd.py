@@ -30,6 +30,8 @@ def restore_links(dev, scenario):
         if compare_device_class(links[i]['src_name'], dev['name']) and links[i]['src_host'] == dev['host']:
             if 'src_'+scenario in links[i]:
                 del links[i]['src_'+scenario]
+            else:
+                continue
             if 'dest_'+scenario not in links[i]:
                 print '  relinking', dev['name'], '->', links[i]['dest_name']
                 monitor.link(dev['name'], links[i]['dest_name'], links[i])
@@ -40,6 +42,8 @@ def restore_links(dev, scenario):
         elif compare_device_class(links[i]['dest_name'], dev['name']) and links[i]['dest_host'] == dev['host']:
             if 'dest_'+scenario in links[i]:
                 del links[i]['dest_'+scenario]
+            else:
+                continue
             if 'src_'+scenario not in links[i]:
                 print '  relinking', links[i]['src_name'], '->', dev['name']
                 monitor.link(links[i]['src_name'], dev['name'], links[i])
