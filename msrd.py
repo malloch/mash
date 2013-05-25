@@ -1,18 +1,99 @@
 #!/usr/bin/env python
 
+import sys
+from PySide.QtCore import *
+from PySide.QtGui import *
 import mapper
-import argparse
-
-monitor = mapper.monitor(enable_autorequest=1)
-
-parser = argparse.ArgumentParser(description='Automatically restore libmapper network state.')
-parser.add_argument('--timeout', dest='timeout', type=int, default=60, help='Timeout after which records are flushed. Links and connections will only be restored if the relevant devices restart before timeout elapses.')
-
-args = parser.parse_args()
-timeout = args.timeout
 
 devices = {}
 links = {}
+monitor = mapper.monitor(enable_autorequest=1)
+timeout = 30
+now = 0
+
+def timeoutChanged(timeoutString):
+    print 'timeout changed to', timeoutString
+
+class msrd(QMainWindow):
+    strict = 1
+    
+    def __init__(self):
+        QMainWindow.__init__(self)
+        self.setGeometry(300, 300, 300, 380)
+        self.setWindowTitle('Mapping Session Handler')
+        #strict_button = QCheckBox("Only support relaunch on same computer.")
+        #strict_button.clicked.connect(set_strict)
+        #strict_button.show()
+
+        self.timeoutLabel1 = QLabel('Timeout:', self)
+        self.timeoutLabel1.setGeometry(20, 20, 70, 20)
+        self.timeout = QLineEdit('60', self)
+        self.timeout.setGeometry(85, 20, 50, 20)
+        self.timeout.setAlignment(Qt.AlignRight)
+        self.timeout.textChanged.connect(timeoutChanged)
+        self.timeoutLabel2 = QLabel('sec', self)
+        self.timeoutLabel2.setGeometry(140, 20, 20, 20)
+
+        self.numrows = 0;
+        self.deviceTable = QTableWidget(self)
+        self.deviceTable.setGeometry(0, 60, 300, 300)
+        self.deviceTable.setRowCount(self.numrows)
+        self.deviceTable.setColumnCount(2)
+        self.deviceTable.setColumnWidth(0, 200)
+        self.deviceTable.setColumnWidth(1, 75)
+        item = QTableWidgetItem('device name')
+        self.deviceTable.setHorizontalHeaderItem(0, item)
+        item = QTableWidgetItem('status')
+        self.deviceTable.setHorizontalHeaderItem(1, item)
+
+        status = "Tracking 0 devices."
+        self.label = QLabel(status, self)
+        self.label.setGeometry(20, 360, 260, 30)
+        self.label.setFrameStyle(QFrame.Panel | QFrame.Sunken)
+
+        self.timer = QBasicTimer()
+        self.timer.start(1000, self)
+
+    def timerEvent(self, event):
+        if event.timerId() == self.timer.timerId():
+            monitor.poll(10)
+            check_devices()
+
+            index = 0
+            active = 0
+            released = 0
+            crashed = 0
+
+            self.deviceTable.clearContents()
+            for i in devices:
+                while index >= self.numrows:
+                    self.numrows += 1
+                    self.deviceTable.setRowCount(self.numrows)
+                    self.deviceTable.setRowHeight(self.numrows-1, 20)
+                item = QTableWidgetItem(devices[i]['name'])
+                self.deviceTable.setItem(index, 0, item)
+                if 'released' in devices[i]:
+                    item = QTableWidgetItem('released')
+                    released += 1
+                elif 'crashed' in devices[i]:
+                    item = QTableWidgetItem('crashed')
+                    crashed += 1
+                else:
+                    item = QTableWidgetItem('active')
+                    active += 1
+                self.deviceTable.setItem(index, 1, item)
+                index += 1
+            if index == 0:
+                self.numrows = index
+                self.deviceTable.setRowCount(self.numrows)
+            elif index <= self.numrows:
+                self.numrows = index + 1
+                self.deviceTable.setRowCount(self.numrows)
+
+            status = "Active: " + str(active) + " | Released: " + str(released) + " | Crashed: " + str(crashed)
+            self.label.setText(status)
+        else:
+            QtGui.QFrame.timerEvent(self, event)
 
 def compare_device_class(name1, name2):
     index = name1.find('.', 0)
@@ -117,8 +198,13 @@ def init_monitor():
 
 init_monitor()
 
-while 1:
-    monitor.poll(1000)
+def resync_monitor():
+    print 'resync!'
+
+def set_strict():
+    print 'set strict!'
+
+def check_devices():
     now = monitor.now()
     for i in monitor.db.all_devices():
         if i['name'] not in devices:
@@ -138,3 +224,8 @@ while 1:
     for k in remove:
         print 'timeout: forgetting crashed device', devices[k]['name']
         del devices[k]
+
+app = QApplication(sys.argv)
+msrd = msrd()
+msrd.show()
+sys.exit(app.exec_())
