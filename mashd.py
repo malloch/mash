@@ -1,96 +1,18 @@
 #!/usr/bin/env python
 
-import sys
-from PySide.QtCore import *
-from PySide.QtGui import *
 import mapper
 
 devices = {}
 links = {}
-monitor = mapper.monitor(enable_autorequest=1)
+monitor = mapper.monitor(autorequest=mapper.AUTOREQ_LINKS | mapper.AUTOREQ_CONNECTIONS)
 relaunch_same_host = 1
-timeout = 30
+timeout = 60
 now = 0
+changed = 0
 
-def timeoutChanged(timeoutString):
-    print 'timeout changed to', timeoutString
-
-class msrd(QMainWindow):
-    strict = 1
-    
-    def __init__(self):
-        QMainWindow.__init__(self)
-        self.setGeometry(300, 300, 300, 380)
-        self.setWindowTitle('Mapping Session Handler')
-        #strict_button = QCheckBox("Only support relaunch on same computer.")
-        #strict_button.clicked.connect(set_strict)
-        #strict_button.show()
-
-        self.timeoutLabel1 = QLabel('Timeout:', self)
-        self.timeoutLabel1.setGeometry(20, 20, 70, 20)
-        self.timeout = QLineEdit('60', self)
-        self.timeout.setGeometry(85, 20, 50, 20)
-        self.timeout.setAlignment(Qt.AlignRight)
-        self.timeout.textChanged.connect(timeoutChanged)
-        self.timeoutLabel2 = QLabel('sec', self)
-        self.timeoutLabel2.setGeometry(140, 20, 20, 20)
-
-        self.numrows = 0;
-        self.deviceTable = QTableWidget(self)
-        self.deviceTable.setGeometry(0, 60, 300, 300)
-        self.deviceTable.setRowCount(self.numrows)
-        self.deviceTable.setColumnCount(2)
-        self.deviceTable.setColumnWidth(0, 200)
-        self.deviceTable.setColumnWidth(1, 75)
-        item = QTableWidgetItem('device name')
-        self.deviceTable.setHorizontalHeaderItem(0, item)
-        item = QTableWidgetItem('status')
-        self.deviceTable.setHorizontalHeaderItem(1, item)
-
-        self.label = QLabel(self)
-        self.label.setGeometry(20, 355, 260, 30)
-
-        self.timer = QBasicTimer()
-        self.timer.start(1000, self)
-
-    def timerEvent(self, event):
-        if event.timerId() == self.timer.timerId():
-            monitor.poll(10)
-            check_devices()
-
-            index = 0
-            active = 0
-            released = 0
-            crashed = 0
-
-            self.deviceTable.clearContents()
-            for i in devices:
-                while index >= self.numrows:
-                    self.numrows += 1
-                    self.deviceTable.setRowCount(self.numrows)
-                    self.deviceTable.setRowHeight(self.numrows-1, 20)
-                item = QTableWidgetItem(devices[i]['name'])
-                self.deviceTable.setItem(index, 0, item)
-                item = QTableWidgetItem(devices[i]['status'])
-                self.deviceTable.setItem(index, 1, item)
-                if devices[i]['status'] == 'released':
-                    released += 1
-                elif devices[i]['status'] == 'crashed':
-                    crashed += 1
-                else:
-                    active += 1
-                index += 1
-            if index == 0:
-                self.numrows = index
-                self.deviceTable.setRowCount(self.numrows)
-            elif index <= self.numrows:
-                self.numrows = index + 1
-                self.deviceTable.setRowCount(self.numrows)
-
-            status = "Active: " + str(active) + " | Released: " + str(released) + " | Crashed: " + str(crashed)
-            self.label.setText(status)
-        else:
-            QtGui.QFrame.timerEvent(self, event)
+def poll(wait=0):
+    monitor.poll(wait)
+    check_devices()
 
 def get_device_class(name):
     return name[0:name.find('.', 0)]
@@ -119,10 +41,10 @@ def restore_links(dev):
                 links[i]['src_name'] = dev['name']
                 del links[i]['src_released']
             else:
-                print '  relinking', dev['name'], '->', links[i]['dest_name']
+                print 'mashd: relinking', dev['name'], '->', links[i]['dest_name']
                 monitor.link(dev['name'], links[i]['dest_name'], links[i])
                 for j in links[i]['connections']:
-                    print '    reconnecting', dev['name']+links[i]['connections'][j]['src_name'], '->', links[i]['dest_name']+links[i]['connections'][j]['dest_name']
+                    print 'mashd: reconnecting', dev['name']+links[i]['connections'][j]['src_name'], '->', links[i]['dest_name']+links[i]['connections'][j]['dest_name']
                     monitor.connect(dev['name']+links[i]['connections'][j]['src_name'], links[i]['dest_name']+links[i]['connections'][j]['dest_name'], links[i]['connections'][j])
                 restored_links.append(i)
         elif 'dest_released' in links[i] and links[i]['dest_name'] == match['name']:
@@ -130,10 +52,10 @@ def restore_links(dev):
                 links[i]['name'] = dev['name']
                 del links[i]['dest_released']
             else:
-                print '  relinking', links[i]['src_name'], '->', dev['name']
+                print 'mashd: relinking', links[i]['src_name'], '->', dev['name']
                 monitor.link(links[i]['src_name'], dev['name'], links[i])
                 for j in links[i]['connections']:
-                    print '    reconnecting', links[i]['src_name']+links[i]['connections'][j]['src_name'], '->', dev['name']+links[i]['connections'][j]['dest_name']
+                    print 'mashd: reconnecting', links[i]['src_name']+links[i]['connections'][j]['src_name'], '->', dev['name']+links[i]['connections'][j]['dest_name']
                     monitor.connect(links[i]['src_name']+links[i]['connections'][j]['src_name'], dev['name']+links[i]['connections'][j]['dest_name'], links[i]['connections'][j])
                 restored_links.append(i)
     for i in restored_links:
@@ -145,6 +67,8 @@ def remove_expired_links(name):
         del links[k]
 
 def on_device(dev, action):
+    global changed
+    changed = 1
     now = monitor.now()
     if action == mapper.MDB_NEW:
         restore_links(dev)
@@ -177,6 +101,8 @@ def on_device(dev, action):
             devices[dev['name']]['synced'] = now
         
 def on_link(link, action):
+    global changed
+    changed = 1
     key = link['src_name'] + '>' + link['dest_name']
     if action == mapper.MDB_NEW:
         links[key] = link
@@ -196,12 +122,15 @@ def on_link(link, action):
         store all released links and check if the parent device is
         released immediately afterwards.
         '''
-        for i in links[key]['connections']:
-            if 'released' in links[key]['connections'][i]:
-                del links[key]['connections'][i]['released']
+        if 'connections' in links[key]:
+            for i in links[key]['connections']:
+                if 'released' in links[key]['connections'][i]:
+                    del links[key]['connections'][i]['released']
         links[key]['released'] = monitor.now()
 
 def on_connection(con, action):
+    global changed
+    changed = 1
     index = con['src_name'].find('/', 1)
     srcdev = con['src_name'][0:index]
     srcsig = con['src_name'][index:]
@@ -232,15 +161,8 @@ def init_monitor():
     monitor.db.add_connection_callback(on_connection)
     monitor.request_devices()
 
-init_monitor()
-
-def resync_monitor():
-    print 'resync!'
-
-def set_strict():
-    print 'set strict!'
-
 def check_devices():
+    global changed
     now = monitor.now()
     for i in monitor.db.all_devices():
         if i['name'] not in devices:
@@ -248,24 +170,34 @@ def check_devices():
         synced = i['synced']
         if synced:
             if now-synced > 11:
-                print 'mashd: device', i['name'], 'may have crashed! (', now-synced, 'sec timeout)'
-                devices[i['name']]['status'] = 'crashed'
-            elif devices[i['name']]['status'] == 'crashed':
+                if devices[i['name']]['status'] == 'active':
+                    print 'mashd: device', i['name'], 'may have crashed! (', now-synced, 'sec timeout)'
+                    devices[i['name']]['status'] = 'crashed'
+                    changed = 1
+            elif devices[i['name']]['status'] != 'active':
                 devices[i['name']]['status'] = 'active'
+                changed = 1
     expired = [i for i in devices if devices[i]['status'] != 'active' and now-devices[i]['synced'] > timeout]
+    if expired:
+        changed = 1
     for i in expired:
-        print 'timeout: forgetting released device', devices[i]['name']
+        print 'mashd: forgetting released device', devices[i]['name'], 'after', now-devices[i]['synced'], 'seconds.'
         remove_expired_links(devices[i]['name'])
         del devices[i]
     expired = [i for i in links if 'released' in links[i] and now-links[i]['released'] > 2]
+    if expired:
+        changed = 1
     for i in expired:
         del links[i]
     for i in links:
         expired = [j for j in links[i]['connections'] if 'released' in links[i]['connections'][j] and now-links[i]['connections'][j]['released'] > 2]
+        if expired:
+            changed = 1
         for j in expired:
             del links[i]['connections'][j]
 
-app = QApplication(sys.argv)
-msrd = msrd()
-msrd.show()
-sys.exit(app.exec_())
+init_monitor()
+
+if __name__ == '__main__':
+    while 1:
+        poll(1000)
