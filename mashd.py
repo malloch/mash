@@ -202,10 +202,12 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description='Automatically restore libmapper network state.')
-    parser.add_argument('--timeout', dest='timeout', type=int, default=60, help='Timeout after which records are flushed. Links and connections will only be restored if the relevant devices restart before timeout elapses.')
+    parser.add_argument('--timeout', dest='timeout', type=int, default=60, help='Timeout after which records are flushed. Links and connections will only be restored if the relevant devices restart before timeout elapses (default 60).')
+    parser.add_argument('--same_host', dest='same_host', type=int, default=1, help='Only handle device relaunches on same host computer as released device (default 1).')
 
     args = parser.parse_args()
     timeout = args.timeout
+    relaunch_same_host = args.same_host
 
     while 1:
         poll(1000)
