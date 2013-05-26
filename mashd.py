@@ -199,5 +199,13 @@ def check_devices():
 init_monitor()
 
 if __name__ == '__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Automatically restore libmapper network state.')
+    parser.add_argument('--timeout', dest='timeout', type=int, default=60, help='Timeout after which records are flushed. Links and connections will only be restored if the relevant devices restart before timeout elapses.')
+
+    args = parser.parse_args()
+    timeout = args.timeout
+
     while 1:
         poll(1000)
