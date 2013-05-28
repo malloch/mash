@@ -9,9 +9,23 @@ crashed_color = QBrush(QColor(200, 0, 0))
 active_color = QBrush(QColor(0, 200, 0))
 released_color = QBrush(QColor(0, 0, 200))
 
+timeoutTemp = 60
+timeoutValidator = QIntValidator()
+timeoutValidator.setBottom(1)
+
 def timeoutChanged(timeoutString):
-    print 'timeout changed to', timeoutString
-    #mashd.timeout =
+    global timeoutTemp
+    if timeoutString:
+        timeoutTemp = int(timeoutString)
+
+
+def timeoutEntered():
+    global timeoutTemp
+    if timeoutTemp and timeoutTemp > 0:
+        mashd.timeout = timeoutTemp
+
+def relaunchSameHostChanged(state):
+    mashd.relaunch_same_host = 1 if state else 0
 
 class mashGUI(QMainWindow):
     strict = 1
@@ -19,16 +33,30 @@ class mashGUI(QMainWindow):
     def __init__(self):
         QMainWindow.__init__(self)
         self.setGeometry(300, 300, 300, 380)
+        self.setFixedSize(300, 380)
         self.setWindowTitle('Mapping Session Handler')
 
-        self.timeoutLabel1 = QLabel('Timeout:', self)
-        self.timeoutLabel1.setGeometry(20, 20, 70, 20)
+        self.timeoutLabel1 = QLabel('Time window for device restart:', self)
+        self.timeoutLabel1.setGeometry(5, 10, 250, 10)
         self.timeout = QLineEdit('60', self)
-        self.timeout.setGeometry(85, 20, 50, 20)
+        self.timeout.setValidator(timeoutValidator)
+        self.timeout.setGeometry(210, 5, 55, 20)
         self.timeout.setAlignment(Qt.AlignRight)
         self.timeout.textChanged.connect(timeoutChanged)
+        self.timeout.editingFinished.connect(timeoutEntered)
+        self.timeout.setFocusPolicy(Qt.ClickFocus)
+        self.timeout.clearFocus()
         self.timeoutLabel2 = QLabel('sec', self)
-        self.timeoutLabel2.setGeometry(140, 20, 20, 20)
+        self.timeoutLabel2.setGeometry(270, 5, 20, 20)
+
+        self.separator = QLabel(self)
+        self.separator.setFrameStyle(QFrame.Panel | QFrame.Sunken)
+        self.separator.setGeometry(5, 30, 290, 2)
+
+        self.relaunchSameHost = QCheckBox('Devices must relaunch on same host.', self)
+        self.relaunchSameHost.setGeometry(5, 36, 260, 20)
+        self.relaunchSameHost.setChecked(1)
+        self.relaunchSameHost.stateChanged.connect(relaunchSameHostChanged)
 
         self.numrows = 0;
         self.deviceTable = QTableWidget(self)
@@ -43,8 +71,8 @@ class mashGUI(QMainWindow):
         item = QTableWidgetItem('status')
         self.deviceTable.setHorizontalHeaderItem(1, item)
 
-        self.label = QLabel(self)
-        self.label.setGeometry(20, 355, 260, 30)
+        self.statusLabel = QLabel('Active: 0, Released: 0, Crashed: 0', self)
+        self.statusLabel.setGeometry(5, 355, 260, 30)
 
         self.timer = QBasicTimer()
         self.timer.start(500, self)
@@ -90,7 +118,7 @@ class mashGUI(QMainWindow):
                 self.deviceTable.setRowCount(self.numrows)
 
             status = "Active: " + str(active) + " | Released: " + str(released) + " | Crashed: " + str(crashed)
-            self.label.setText(status)
+            self.statusLabel.setText(status)
         else:
             QtGui.QFrame.timerEvent(self, event)
 
