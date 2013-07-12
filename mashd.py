@@ -16,6 +16,12 @@ def poll(wait=0):
     monitor.poll(wait)
     check_devices()
 
+def increment_id_counter():
+    global id_counter
+    id_counter += 1
+    if id_counter < 0:
+        id_counter = 0
+
 def get_device_class(name):
     return name[0:name.find('.', 0)]
 
@@ -94,11 +100,12 @@ def on_device(dev, action):
     changed = 1
     now = monitor.now()
     if action == mapper.MDB_NEW:
+        print 'new device:', dev['name'], '(', id_counter, ')'
         devices[id_counter] = dev
         devices[id_counter]['status'] = 'active'
         devices[id_counter]['synced'] = now
         restore_links(id_counter)
-        id_counter += 1
+        increment_id_counter()
     elif action == mapper.MDB_REMOVE:
         found = lookup_device(dev['name'])
         if found == -1:
