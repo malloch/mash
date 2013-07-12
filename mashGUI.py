@@ -32,8 +32,8 @@ class mashGUI(QMainWindow):
     
     def __init__(self):
         QMainWindow.__init__(self)
-        self.setGeometry(300, 300, 300, 380)
-        self.setFixedSize(300, 380)
+        self.setGeometry(300, 300, 500, 380)
+        self.setFixedSize(500, 300)
         self.setWindowTitle('Mapping Session Handler')
 
         self.timeoutLabel1 = QLabel('Time window for device restart:', self)
@@ -60,16 +60,22 @@ class mashGUI(QMainWindow):
 
         self.numrows = 0;
         self.deviceTable = QTableWidget(self)
-        self.deviceTable.setGeometry(0, 60, 300, 300)
+        self.deviceTable.setGeometry(0, 60, 500, 300)
         self.deviceTable.setRowCount(self.numrows)
-        self.deviceTable.setColumnCount(2)
-        self.deviceTable.setColumnWidth(0, 200)
-        self.deviceTable.setColumnWidth(1, 75)
+        self.deviceTable.setColumnCount(4)
+        self.deviceTable.setColumnWidth(0, 50)
+        self.deviceTable.setColumnWidth(1, 175)
+        self.deviceTable.setColumnWidth(2, 175)
+        self.deviceTable.setColumnWidth(3, 75)
         self.deviceTable.setSelectionMode(QAbstractItemView.NoSelection)
-        item = QTableWidgetItem('device name')
+        item = QTableWidgetItem('mpid')
         self.deviceTable.setHorizontalHeaderItem(0, item)
-        item = QTableWidgetItem('status')
+        item = QTableWidgetItem('device name')
         self.deviceTable.setHorizontalHeaderItem(1, item)
+        item = QTableWidgetItem('host')
+        self.deviceTable.setHorizontalHeaderItem(2, item)
+        item = QTableWidgetItem('status')
+        self.deviceTable.setHorizontalHeaderItem(3, item)
 
         self.statusLabel = QLabel('Active: 0, Released: 0, Crashed: 0', self)
         self.statusLabel.setGeometry(5, 355, 260, 30)
@@ -96,10 +102,14 @@ class mashGUI(QMainWindow):
                     self.numrows += 1
                     self.deviceTable.setRowCount(self.numrows)
                     self.deviceTable.setRowHeight(self.numrows-1, 20)
-                item = QTableWidgetItem(mashd.devices[i]['name'])
+                item = QTableWidgetItem(i)
                 self.deviceTable.setItem(index, 0, item)
-                item = QTableWidgetItem(mashd.devices[i]['status'])
+                item = QTableWidgetItem(mashd.devices[i]['name'])
                 self.deviceTable.setItem(index, 1, item)
+                item = QTableWidgetItem(mashd.devices[i]['host'])
+                self.deviceTable.setItem(index, 2, item)
+                item = QTableWidgetItem(mashd.devices[i]['status'])
+                self.deviceTable.setItem(index, 3, item)
                 if mashd.devices[i]['status'] == 'released':
                     item.setForeground(released_color)
                     released += 1

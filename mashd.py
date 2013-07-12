@@ -10,6 +10,8 @@ timeout = 60
 now = 0
 changed = 0
 
+id_counter = 0;
+
 def poll(wait=0):
     monitor.poll(wait)
     check_devices()
@@ -17,72 +19,89 @@ def poll(wait=0):
 def get_device_class(name):
     return name[0:name.find('.', 0)]
 
-def restore_links(dev):
+def lookup_device(name):
+    for i in devices:
+        if devices[i]['name'] == name:
+            return i
+    return -1
+
+def split_sig_name(name):
+    index = name.find('/', 1)
+    dev = name[0:index]
+    sig = name[index:]
+    return [dev, sig]
+
+def restore_links(dev_id):
     now = monitor.now()
     # find most recently released of possible matches
-    match = None
+    dev_class = get_device_class(devices[dev_id]['name'])
+    dev_host = devices[dev_id]['host']
+    match = -1
     for i in devices:
-        if devices[i]['status'] == 'active':
+        if i == dev_id:
             continue
-        if get_device_class(dev['name']) != get_device_class(devices[i]['name']):
+        elif devices[i]['status'] == 'active':
             continue
-        if relaunch_same_host and devices[i]['host'] != dev['host']:
+        elif dev_class != get_device_class(devices[i]['name']):
             continue
-        if not match or devices[i]['synced'] > match['synced']:
-            match = devices[i]
-    if not match:
+        elif relaunch_same_host and devices[i]['host'] != dev_host:
+            continue
+        elif match < 0 or devices[i]['synced'] > devices[match]['synced']:
+            match = i
+    if match == -1:
         return
-    print 'mashd: device', dev['name'], 'restarted as', match['name'], 'after', now-match['synced'], 'seconds.'
+    print 'mashd: device', devices[match]['name'], 'restarted as', devices[dev_id]['name'], 'after', now-devices[match]['synced'], 'seconds.'
 
     restored_links = []
     for i in links:
-        if 'src_released' in links[i] and links[i]['src_name'] == match['name']:
+        if 'src_released' in links[i] and links[i]['src_id'] == match:
             if 'dest_released' in links[i]:
-                links[i]['src_name'] = dev['name']
+                links[i]['src_name'] = devices[dev_id]['name']
+                links[i]['src_id'] = dev_id
                 del links[i]['src_released']
             else:
-                print 'mashd: relinking', dev['name'], '->', links[i]['dest_name']
-                monitor.link(dev['name'], links[i]['dest_name'], links[i])
+                print 'mashd: relinking', devices[dev_id]['name'], '->', links[i]['dest_name']
+                monitor.link(devices[dev_id]['name'], links[i]['dest_name'], links[i])
                 for j in links[i]['connections']:
-                    print 'mashd: reconnecting', dev['name']+links[i]['connections'][j]['src_name'], '->', links[i]['dest_name']+links[i]['connections'][j]['dest_name']
-                    monitor.connect(dev['name']+links[i]['connections'][j]['src_name'], links[i]['dest_name']+links[i]['connections'][j]['dest_name'], links[i]['connections'][j])
+                    print 'mashd: reconnecting', devices[dev_id]['name']+links[i]['connections'][j]['src_name'], '->', links[i]['dest_name']+links[i]['connections'][j]['dest_name']
+                    monitor.connect(devices[dev_id]['name']+links[i]['connections'][j]['src_name'], links[i]['dest_name']+links[i]['connections'][j]['dest_name'], links[i]['connections'][j])
                 restored_links.append(i)
-        elif 'dest_released' in links[i] and links[i]['dest_name'] == match['name']:
+        elif 'dest_released' in links[i] and links[i]['dest_id'] == match:
             if 'src_released' in links[i]:
-                links[i]['name'] = dev['name']
+                links[i]['name'] = devices[dev_id]['name']
+                links[i]['dest_id'] = dev_id
                 del links[i]['dest_released']
             else:
-                print 'mashd: relinking', links[i]['src_name'], '->', dev['name']
-                monitor.link(links[i]['src_name'], dev['name'], links[i])
+                print 'mashd: relinking', links[i]['src_name'], '->', devices[dev_id]['name']
+                monitor.link(links[i]['src_name'], devices[dev_id]['name'], links[i])
                 for j in links[i]['connections']:
-                    print 'mashd: reconnecting', links[i]['src_name']+links[i]['connections'][j]['src_name'], '->', dev['name']+links[i]['connections'][j]['dest_name']
-                    monitor.connect(links[i]['src_name']+links[i]['connections'][j]['src_name'], dev['name']+links[i]['connections'][j]['dest_name'], links[i]['connections'][j])
+                    print 'mashd: reconnecting', links[i]['src_name']+links[i]['connections'][j]['src_name'], '->', devices[dev_id]['name']+links[i]['connections'][j]['dest_name']
+                    monitor.connect(links[i]['src_name']+links[i]['connections'][j]['src_name'], devices[dev_id]['name']+links[i]['connections'][j]['dest_name'], links[i]['connections'][j])
                 restored_links.append(i)
     for i in restored_links:
         del links[i]
 
-def remove_expired_links(name):
-    expired = [k for k in links if links[k]['src_name'] == name or links[k]['dest_name'] == name]
+    # Remove old device record
+    del devices[match]
+
+def remove_expired_links(dev_id):
+    expired = [k for k in links if links[k]['src_id'] == dev_id or links[k]['dest_id'] == dev_id]
     for k in expired:
         del links[k]
 
 def on_device(dev, action):
-    global changed
+    global changed, id_counter
     changed = 1
     now = monitor.now()
     if action == mapper.MDB_NEW:
-        restore_links(dev)
-        devices[dev['name']] = dev
-        devices[dev['name']]['status'] = 'active'
-        devices[dev['name']]['synced'] = now
-    elif action == mapper.MDB_MODIFY:
-        if dev['name'] not in devices:
-            devices[dev['name']] = dev
-        else:
-            for i in dev:
-                devices[dev['name']][i] = dev[i]
+        devices[id_counter] = dev
+        devices[id_counter]['status'] = 'active'
+        devices[id_counter]['synced'] = now
+        restore_links(id_counter)
+        id_counter += 1
     elif action == mapper.MDB_REMOVE:
-        if dev['name'] not in devices:
+        found = lookup_device(dev['name'])
+        if found == -1:
             return
         outgoing_links = [k for k in links if links[k]['src_name'] == dev['name']]
         for k in outgoing_links:
@@ -95,20 +114,24 @@ def on_device(dev, action):
                 del links[k]['released']
             links[k]['dest_released'] = now
         if not outgoing_links and not incoming_links:
-            del devices[dev['name']]
+            del devices[found]
         else:
-            devices[dev['name']]['status'] = 'released'
-            devices[dev['name']]['synced'] = now
+            devices[found]['status'] = 'released'
+            devices[found]['synced'] = now
         
 def on_link(link, action):
     global changed
     changed = 1
     key = link['src_name'] + '>' + link['dest_name']
+    src = lookup_device(link['src_name'])
+    dest = lookup_device(link['dest_name'])
     if action == mapper.MDB_NEW:
+        link['connections'] = {}
+        link['src_id'] = src
+        link['dest_id'] = dest
+        link['src_host'] = devices[src]['host']
+        link['dest_host'] = devices[dest]['host']
         links[key] = link
-        links[key]['connections'] = {}
-        links[key]['src_host'] = devices[link['src_name']]['host']
-        links[key]['dest_host'] = devices[link['dest_name']]['host']
     elif action == mapper.MDB_MODIFY:
         for i in link:
             links[key][i] = link[i]
@@ -122,7 +145,7 @@ def on_link(link, action):
         store all released links and check if the parent device is
         released immediately afterwards.
         '''
-        if 'connections' in links[key]:
+        if key in links and 'connections' in links[key]:
             for i in links[key]['connections']:
                 if 'released' in links[key]['connections'][i]:
                     del links[key]['connections'][i]['released']
@@ -131,12 +154,8 @@ def on_link(link, action):
 def on_connection(con, action):
     global changed
     changed = 1
-    index = con['src_name'].find('/', 1)
-    srcdev = con['src_name'][0:index]
-    srcsig = con['src_name'][index:]
-    index = con['dest_name'].find('/', 1)
-    destdev = con['dest_name'][0:index]
-    destsig = con['dest_name'][index:]
+    [srcdev, srcsig] = split_sig_name(con['src_name'])
+    [destdev, destsig] = split_sig_name(con['dest_name'])
     devkey = srcdev + '>' + destdev
     sigkey = srcsig + '>' + destsig
     if action == mapper.MDB_NEW or action == mapper.MDB_MODIFY:
@@ -153,7 +172,8 @@ def on_connection(con, action):
         store all released connections and check if the parent link
         or device is released immediately afterwards.
         '''
-        links[devkey]['connections'][sigkey]['released'] = monitor.now()
+        if devkey in links and sigkey in links[devkey]['connections']:
+            links[devkey]['connections'][sigkey]['released'] = monitor.now()
 
 def init_monitor():
     monitor.db.add_device_callback(on_device)
@@ -164,25 +184,28 @@ def init_monitor():
 def check_devices():
     global changed
     now = monitor.now()
-    for i in monitor.db.all_devices():
-        if i['name'] not in devices:
+    for dev in monitor.db.all_devices():
+        found = lookup_device(dev['name'])
+        if found == -1:
+            on_device(dev, mapper.MDB_NEW)
             continue
-        synced = i['synced']
+        synced = dev['synced']
         if synced:
             if now-synced > 11:
-                if devices[i['name']]['status'] == 'active':
-                    print 'mashd: device', i['name'], 'may have crashed! (', now-synced, 'sec timeout)'
-                    devices[i['name']]['status'] = 'crashed'
+                if devices[found]['status'] == 'active':
+                    print 'mashd: device', dev['name'], 'may have crashed! (', now-synced, 'sec timeout)'
+                    devices[found]['status'] = 'crashed'
                     changed = 1
-            elif devices[i['name']]['status'] != 'active':
-                devices[i['name']]['status'] = 'active'
+            elif devices[found]['status'] != 'active':
+                devices[found]['status'] = 'active'
+                devices[found]['synced'] = now
                 changed = 1
     expired = [i for i in devices if devices[i]['status'] != 'active' and now-devices[i]['synced'] > timeout]
     if expired:
         changed = 1
     for i in expired:
         print 'mashd: forgetting released device', devices[i]['name'], 'after', now-devices[i]['synced'], 'seconds.'
-        remove_expired_links(devices[i]['name'])
+        remove_expired_links(i)
         del devices[i]
     expired = [i for i in links if 'released' in links[i] and now-links[i]['released'] > 2]
     if expired:
