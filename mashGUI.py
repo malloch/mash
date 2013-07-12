@@ -102,7 +102,7 @@ class mashGUI(QMainWindow):
                     self.numrows += 1
                     self.deviceTable.setRowCount(self.numrows)
                     self.deviceTable.setRowHeight(self.numrows-1, 20)
-                item = QTableWidgetItem(i)
+                item = QTableWidgetItem('%i' %i)
                 self.deviceTable.setItem(index, 0, item)
                 item = QTableWidgetItem(mashd.devices[i]['name'])
                 self.deviceTable.setItem(index, 1, item)
